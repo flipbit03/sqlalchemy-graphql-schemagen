@@ -4,6 +4,22 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
+    name="fbsak",
+    license="MIT",
+    version="0.8.0",
+    author="flipbit03",
+    author_email="cadu.coelho@gmail.com",
+    description="flipbit03's Swiss Army Knife",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/flipbit03/fbsak",
+    packages=find_packages(),
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    python_requires=">=3.7",
     install_requires=[
         "aniso8601==7.0.0",
         "click==7.0",
@@ -24,20 +40,4 @@ setup(
         "sqlalchemy==1.3.13",
         "werkzeug==1.0.0",
     ],
-    name="fbsak",
-    license='MIT',
-    version="0.8.0",
-    author="flipbit03",
-    author_email="cadu.coelho@gmail.com",
-    description="flipbit03's Swiss Army Knife",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/flipbit03/fbsak",
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-    ],
-    python_requires=">=3.7",
 )
