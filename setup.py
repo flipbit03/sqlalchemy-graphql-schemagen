@@ -25,6 +25,7 @@ setup(
         "werkzeug==1.0.0",
     ],
     name="fbsak",
+    license='MIT',
     version="0.8.0",
     author="flipbit03",
     author_email="cadu.coelho@gmail.com",
