@@ -5,6 +5,7 @@ verify_ssl = true
 
 [dev-packages]
 pipenv-setup = "*"
+twine = "*"
 
 [packages]
 graphene = "==2.1.8"
