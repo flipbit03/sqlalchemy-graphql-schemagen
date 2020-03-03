@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Callable
+from typing import List, Tuple, Dict, Callable, Union
 
 import graphene
 from graphene.utils.str_converters import to_camel_case
@@ -7,7 +7,7 @@ from graphene_sqlalchemy import SQLAlchemyObjectType
 from graphene_sqlalchemy.converter import convert_sqlalchemy_type
 from graphene_sqlalchemy.registry import get_global_registry
 import sqlalchemy
-from sqlalchemy import Column, inspect, ColumnDefault
+from sqlalchemy import Column, inspect, ColumnDefault, Table
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy.orm import Mapper, Session, Query
 from sqlalchemy.orm.state import InstanceState
@@ -50,6 +50,25 @@ class OurBaseSQLAlchemyObjectType(SQLAlchemyObjectType):
 ################################
 ################################
 
+################################
+# Function to check if a SQLAlchemy's Model Class is Associative
+################################
+def is_association_table(sa_model_class) -> bool:
+    mci: Mapper = inspect(sa_model_class)
+    return list(mci.columns.values()) == list(mci.primary_key)
+
+
+################################
+# Get the SqlAlchemy's "Queryable Object"'s name (be it a Class or Table)
+################################
+def get_sa_queryable_name(sa_queryable_obj):
+    if isinstance(sa_queryable_obj, Table):
+        table_name = str(sa_queryable_obj.name)
+    else:
+        mci: Mapper = inspect(sa_queryable_obj)
+        table_name = str(mci.tables[0].name)
+    return table_name
+
 
 ################################
 # Get all SQLAlchemy's Model Classes as a List
@@ -66,15 +85,83 @@ def get_all_sa_model_classes(
     return model_classes
 
 
+################################
+# Get all SQLAlchemy's Model Classless Tables (ex:many2many) as a List
+################################
+def get_all_sa_classless_tables(sa_model_base_class: DeclarativeMeta,) -> List[Table]:
+    # Get SQLAlchemy Class Registry
+    sa_class_registry: dict = getattr(sa_model_base_class, "_decl_class_registry")
+
+    # List of all Model Classes from SQLAlchemy
+    model_classes = get_all_sa_model_classes(sa_model_base_class)
+    model_classes_table_list = [o.__table__ for o in model_classes]
+
+    # All Tables
+    all_tables = sa_model_base_class.metadata.tables.values()
+
+    # Extract Remaining tables.
+    classless_sa_tables = [
+        table_obj
+        for table_obj in all_tables
+        if table_obj not in model_classes_table_list
+    ]
+
+    return classless_sa_tables
+
+
 ##################################################
 # SQLAlchemySchemaGenerator Helper Functions
 ##################################################
-def gql_query_build_sa_obj_type(sa_model_class: DeclarativeMeta):
+def create_input_field_args(sa_column) -> dict:
+    field_args = {}
+
+    ################################
+    # Field Docstring
+    ################################
+    # Field doc= argument
+    sa_column_doc_string = getattr(sa_column, "doc", None)
+    if sa_column_doc_string:
+        field_args["description"] = sa_column_doc_string
+
+    # If the field is a primary_key, make it OPTIONAL
+    if sa_column.primary_key:
+        ################################
+        # Primary Key - Make it Optional and Return
+        ################################
+        field_args["required"] = False
+    else:
+        ################################
+        # Normal Column
+        ################################
+
+        # Is this column NOT NULL? make it required
+        if not sa_column.nullable:
+            field_args["required"] = True
+
+        # do we have a default value on this column?
+        if sa_column.default:
+            cd: ColumnDefault = sa_column.default
+
+            # Disable 'required' above
+            field_args["required"] = False
+
+            # is the default an scalar
+            if cd.is_scalar:
+                # set the default value from that scalar.
+                field_args["default_value"] = cd.arg
+
+    return field_args
+
+
+def gql_query_build_sa_obj_type(sa_queryable_object: Union[DeclarativeMeta, Table]):
     meta_model_class = type(
-        "Meta", (), {"model": sa_model_class, "description": sa_model_class.__doc__}
+        "Meta",
+        (),
+        {"model": sa_queryable_object, "description": sa_queryable_object.__doc__},
     )
+
     sa_obj_type_class = type(
-        f"{sa_model_class.__name__}",
+        f"{get_sa_queryable_name(sa_queryable_object)}",
         (OurBaseSQLAlchemyObjectType,),
         {"Meta": meta_model_class},
     )
@@ -92,14 +179,24 @@ order_by_ops = {"ASC": sqlalchemy.asc, "DESC": sqlalchemy.desc}
 # - with filter
 # - with pagination
 ################################
+def make_resolve_func_maker_func_name(sa_queryable_obj) -> str:
+    # Generate Resolver Function Name
+    # Example: "resolve_Users"
+
+    queryable_name = get_sa_queryable_name(sa_queryable_obj)
+    funcname = f"resolve_{queryable_name}"
+
+    return funcname
+
+
 def make_resolve_func_maker(
-    sa_model_class: DeclarativeMeta, get_session_func: Callable, hooks: HookDictType
+    sa_queryable_obj: DeclarativeMeta, get_session_func: Callable, hooks: HookDictType
 ) -> Callable:
     def resolve_func(_parent, _info, **kwargs):
-        nonlocal sa_model_class
+        nonlocal sa_queryable_obj
 
         # Get Mapper for SQLAlchemy's Model Class
-        m: Mapper = inspect(sa_model_class)
+        m: Mapper = inspect(sa_queryable_obj)
 
         # Get the Session() so we can access the database
         s: Session = get_session_func()
@@ -107,7 +204,7 @@ def make_resolve_func_maker(
         ################################
         # Base Query
         ################################
-        q = s.query(sa_model_class)
+        q = s.query(sa_queryable_obj)
 
         ################################
         # Filter
@@ -187,10 +284,7 @@ def make_resolve_func_maker(
 
     # Generate Resolver Function Name
     # Example: "resolve_Users"
-    mci: Mapper = inspect(sa_model_class)
-    table_name = str(mci.tables[0].name)
-
-    final_resolve_func_name = f"resolve_{table_name}"
+    final_resolve_func_name = make_resolve_func_maker_func_name(sa_queryable_obj)
     final_resolve_func.__name__ = final_resolve_func_name
 
     return final_resolve_func
@@ -490,6 +584,7 @@ def create_update_obj_mutation_object(
 ################################
 ################################
 
+
 ################################
 # Object that validates the input arguments of the Create<Model> function
 ################################
@@ -503,33 +598,8 @@ def create_gql_create_input_object_type_from_sa_class(
     for sa_column in sa_column_list:
         graphql_type = get_graphql_field_type_for_sa_column(sa_column)
 
-        # Skip the primary key: we are attempting to CREATE an Object
-        # (which will receive a new id from the backend)
-        if sa_column.primary_key:
-            continue
-
-        field_args = {}
-
-        # Is this column NOT NULL? make it required
-        if not sa_column.nullable:
-            field_args["required"] = True
-
-        # do we have a default value on this column?
-        if sa_column.default:
-            cd: ColumnDefault = sa_column.default
-
-            # Disable 'required' above
-            field_args["required"] = False
-
-            # is the default an scalar
-            if cd.is_scalar:
-                # set the default value from that scalar.
-                field_args["default_value"] = cd.arg
-
-        # Field doc= argument
-        sa_column_doc_string = getattr(sa_column, "doc", None)
-        if sa_column_doc_string:
-            field_args["description"] = sa_column_doc_string
+        # Generate GraphQL Field Arguments from SQLAlchemy's Column Type, Default Value, Docstring, ...
+        field_args = create_input_field_args(sa_column)
 
         # Populate Class Dict
         input_class_fields[sa_column.name] = graphql_type(**field_args)
@@ -654,9 +724,13 @@ def create_create_obj_mutation_object(
 ################################
 def create_gql_mutation_delete_arguments_class(sa_model_class: DeclarativeMeta) -> type:
 
-    pk_name = inspect(sa_model_class).primary_key[0].name
+    arg_class_items = {}
 
-    arg_class_items = {pk_name: graphene.Int(required=True)}
+    primary_keys = inspect(sa_model_class).primary_key
+
+    for pk_obj in primary_keys:
+        pk_name = pk_obj.name
+        arg_class_items[pk_name] = graphene.Int(required=True)
 
     arguments_class = type("Arguments", (), arg_class_items)
 
@@ -699,15 +773,17 @@ def create_delete_obj_mutation_object(
     )
 
     # primary key name
-    pk_name = inspect(sa_model_class).primary_key[0].name
+    pk_names = [x.name for x in inspect(sa_model_class).primary_key]
 
     # Mutate Function Entry Point
     def mutate_func(root, info, **kwargs):
         # get pk_name from the outside scope
-        nonlocal pk_name
+        nonlocal pk_names
 
-        # Get the new instance data from kwargs[param_name]
-        pk_id: dict = kwargs.get(pk_name)
+        pkdict = {}
+        for pk_name in pk_names:
+            # Get the new instance data from kwargs[param_name]
+            pkdict[pk_name] = kwargs.get(pk_name)
 
         ###################
         # DELETE DATA
@@ -717,11 +793,14 @@ def create_delete_obj_mutation_object(
         s: Session = get_session_hook()
 
         # Find the object and flag it for deletion in the next commit.
-        deleted_count = (
-            s.query(sa_model_class)
-            .filter(getattr(sa_model_class, pk_name) == int(pk_id))
-            .delete()
-        )
+        deleted_base_query = s.query(sa_model_class)
+        for pk_name, pk_id in pkdict.items():
+            deleted_base_query = deleted_base_query.filter(
+                getattr(sa_model_class, pk_name) == int(pk_id)
+            )
+
+        # Delete and return how many objects were deleted.
+        deleted_count = deleted_base_query.delete()
 
         # Commit (Delete)
         s.commit()
