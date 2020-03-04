@@ -202,8 +202,10 @@ def make_resolve_func_maker(
         # Get the Session() so we can access the database
         s: Session = get_session_func()
 
-        # Never Reuse Objects
-        s.rollback()
+        ################################
+        # Never Reuse Shit.
+        ################################
+        s.close_all()
 
         ################################
         # Base Query

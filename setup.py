@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name="fbsak",
     license="MIT",
-    version="0.8.2",
+    version="0.8.6",
     author="flipbit03",
     author_email="cadu.coelho@gmail.com",
     description="flipbit03's Swiss Army Knife",
