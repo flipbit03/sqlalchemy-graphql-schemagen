@@ -39,7 +39,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
         self,
         api_name: str,
         declarative_base: DeclarativeMeta,
-        get_session_func: Callable[[None], Session],
+        sa_connection_string: str,
         op_hooks: HookDictType = None,
         sa_composite_converters: Dict[Any, Any] = None,
         graphene_schema_args: dict = None,
@@ -47,7 +47,9 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
         self.graphene_schema_args = graphene_schema_args if graphene_schema_args else {}
         self.api_name = api_name
         self.declarative_base = declarative_base
-        self.get_session_func = get_session_func
+
+        # save the connection string
+        self.sa_connection_string = sa_connection_string
 
         # save the hooks
         self.op_hooks = op_hooks or {}
@@ -176,7 +178,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
         self.l.debug(f"[Query] SQLAlchemy Class --> {sa_queryable_object.__name__}")
         # Get resolve_<object> Function
         resolve_func = make_resolve_func_maker(
-            sa_queryable_object, self.get_session_func, self.op_hooks
+            sa_queryable_object, self.sa_connection_string, self.op_hooks
         )
         # Attach resolve func to class.
         root_query_class_dict[resolve_func.__name__] = resolve_func
@@ -222,7 +224,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             ################################
             if not is_association_table(sa_model_class):
                 update_obj_class = create_update_obj_mutation_object(
-                    sa_model_class, self.get_session_func, self.op_hooks
+                    sa_model_class, self.sa_connection_string, self.op_hooks
                 )
 
                 root_mutation_class_dict[
@@ -237,7 +239,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             # CREATE
             ################################
             create_obj_class = create_create_obj_mutation_object(
-                sa_model_class, self.get_session_func, self.op_hooks
+                sa_model_class, self.sa_connection_string, self.op_hooks
             )
 
             root_mutation_class_dict[
@@ -248,7 +250,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             # DELETE
             ################################
             delete_obj_class = create_delete_obj_mutation_object(
-                sa_model_class, self.get_session_func, self.op_hooks
+                sa_model_class, self.sa_connection_string, self.op_hooks
             )
 
             root_mutation_class_dict[

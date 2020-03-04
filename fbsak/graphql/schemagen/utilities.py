@@ -1,15 +1,18 @@
-from typing import List, Tuple, Dict, Callable, Union
+import gc
+from contextlib import contextmanager
+from typing import List, Dict, Callable, Union
 
 import graphene
+import sqlalchemy
 from graphene.utils.str_converters import to_camel_case
 from graphene.utils.subclass_with_meta import SubclassWithMeta_Meta
 from graphene_sqlalchemy import SQLAlchemyObjectType
 from graphene_sqlalchemy.converter import convert_sqlalchemy_type
 from graphene_sqlalchemy.registry import get_global_registry
-import sqlalchemy
-from sqlalchemy import Column, inspect, ColumnDefault, Table
+from sqlalchemy import Column, inspect, ColumnDefault, Table, create_engine
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy.orm import Mapper, Session, Query
+from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.orm.state import InstanceState
 
 from . import HookDictType
@@ -19,19 +22,18 @@ from .extra import (
     OrderByOperation,
 )
 
-
-################################
-################################
-# Global Vars and Registries
-################################
-################################
-
 # this variable holds a list of all graphene.Enums created
 # with the table field names.
 #
 # we need to cache this and reuse accordingly since you cannot
 # have repeated schema names in a GraphQL Schema definition.
 from .hooks import HookOperation
+
+################################
+################################
+# Global Vars and Registries
+################################
+################################
 
 __SCHEMAGEN_field_enum_by_sa_type_registry = {}
 
@@ -189,96 +191,113 @@ def make_resolve_func_maker_func_name(sa_queryable_obj) -> str:
     return funcname
 
 
+################################
+# create an independent, scoped db connection
+# with a well defined lifetime
+# uses 'context manager' so we can use the with: protocol
+################################
+@contextmanager
+def scoped_db_session_from_sa_connection_string(sa_connection_string: str) -> Session:
+    """ Creates a context with an open SQLAlchemy session.
+    """
+    engine = create_engine(sa_connection_string, convert_unicode=True)
+    connection = engine.connect()
+    scoped_db_session = scoped_session(
+        sessionmaker(autocommit=False, autoflush=True, bind=engine)
+    )
+    yield scoped_db_session
+    scoped_db_session.close()
+    connection.close()
+
+
 def make_resolve_func_maker(
-    sa_queryable_obj: DeclarativeMeta, get_session_func: Callable, hooks: HookDictType
+    sa_queryable_obj: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
 ) -> Callable:
+    # Get Mapper for SQLAlchemy's Model Class
+
+    m: Mapper = inspect(sa_queryable_obj)
 
     def resolve_func(_parent, _info, **kwargs):
-        nonlocal sa_queryable_obj
+        with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
 
-        # Get Mapper for SQLAlchemy's Model Class
-        m: Mapper = inspect(sa_queryable_obj)
+            nonlocal sa_queryable_obj
 
-        # Get the Session() so we can access the database
-        s: Session = get_session_func()
+            ################################
+            # Base Query
+            ################################
+            q = s.query(sa_queryable_obj)
 
-        ################################
-        # Never Reuse Shit.
-        ################################
-        s.close_all()
+            ################################
+            # Filter
+            ################################
 
-        ################################
-        # Base Query
-        ################################
-        q = s.query(sa_queryable_obj)
+            # List of Filters
+            filter_obj_list = kwargs.get("filters", {})
 
-        ################################
-        # Filter
-        ################################
+            for filter_obj in filter_obj_list:
+                for filter_name in filter_obj:
+                    filter_obj = filter_obj[filter_name]
 
-        # List of Filters
-        filter_obj_list = kwargs.get("filters", {})
+                    sa_column: Column = m.columns[filter_name]
 
-        for filter_obj in filter_obj_list:
-            for filter_name in filter_obj:
-                filter_obj = filter_obj[filter_name]
+                    if FilterOperation.get(filter_obj.op) == FilterOperation.EQ:
+                        q = q.filter(sa_column == filter_obj.v)
 
-                sa_column: Column = m.columns[filter_name]
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.NEQ:
+                        q = q.filter(sa_column != filter_obj.v)
 
-                if FilterOperation.get(filter_obj.op) == FilterOperation.EQ:
-                    q = q.filter(sa_column == filter_obj.v)
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.IS:
+                        q = q.filter(sa_column.is_(filter_obj.v))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.NEQ:
-                    q = q.filter(sa_column != filter_obj.v)
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.ISNOT:
+                        q = q.filter(sa_column.isnot(filter_obj.v))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.IS:
-                    q = q.filter(sa_column.is_(filter_obj.v))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.LT:
+                        q = q.filter(sa_column < filter_obj.v)
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.ISNOT:
-                    q = q.filter(sa_column.isnot(filter_obj.v))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.GT:
+                        q = q.filter(sa_column > filter_obj.v)
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.LT:
-                    q = q.filter(sa_column < filter_obj.v)
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.LIKE:
+                        q = q.filter(sa_column.like(f"%{filter_obj.v}%"))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.GT:
-                    q = q.filter(sa_column > filter_obj.v)
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTLIKE:
+                        q = q.filter(sa_column.notlike(f"%{filter_obj.v}%"))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.LIKE:
-                    q = q.filter(sa_column.like(f"%{filter_obj.v}%"))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.ILIKE:
+                        q = q.filter(sa_column.ilike(f"%{filter_obj.v}%"))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTLIKE:
-                    q = q.filter(sa_column.notlike(f"%{filter_obj.v}%"))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTILIKE:
+                        q = q.filter(sa_column.notilike(f"%{filter_obj.v}%"))
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.ILIKE:
-                    q = q.filter(sa_column.ilike(f"%{filter_obj.v}%"))
+            ################################
+            # ORDER_BY
+            ################################
 
-                elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTILIKE:
-                    q = q.filter(sa_column.notilike(f"%{filter_obj.v}%"))
+            order_by_params = kwargs.get("order_by")
 
-        ################################
-        # ORDER_BY
-        ################################
+            if order_by_params:
+                order_by_function = order_by_ops[order_by_params.o]
+                order_column = m.columns[order_by_params.f]
 
-        order_by_params = kwargs.get("order_by")
+                q = q.order_by(order_by_function(order_column))
 
-        if order_by_params:
-            order_by_function = order_by_ops[order_by_params.o]
-            order_column = m.columns[order_by_params.f]
+            ################################
+            # LIMIT / OFFSET (Pagination)
+            ################################
 
-            q = q.order_by(order_by_function(order_column))
+            # Pagination
+            page = max(0, kwargs.get("page") - 1)
+            perpage = kwargs.get("perpage")
 
-        ################################
-        # LIMIT / OFFSET (Pagination)
-        ################################
+            # Apply Pagination
+            q = q.limit(perpage).offset(page * perpage)
 
-        # Pagination
-        page = max(0, kwargs.get("page") - 1)
-        perpage = kwargs.get("perpage")
+            results = q.all()
 
-        # Apply Pagination
-        q = q.limit(perpage).offset(page * perpage)
+            gc.collect()
 
-        return q.all()
+        return results
 
     # Bind final_resolve_func to the vanilla (without hooks) resolve function.
     final_resolve_func = resolve_func
@@ -488,10 +507,20 @@ def create_gql_mutation_update_arguments_class(sa_model_class: DeclarativeMeta) 
 
 
 ################################
+# Get the Original Object by PRIMARY KEY ID
+################################
+def get_sa_obj_by_pk_id(
+    sa_class: DeclarativeMeta, pk_name: str, pk_id: int, s: Session
+) -> DeclarativeMeta:
+    x = s.query(sa_class).filter(getattr(sa_class, pk_name) == int(pk_id)).one()
+    return x
+
+
+################################
 # update<Model> MAIN FUNCTION
 ################################
 def create_update_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, get_session_hook, hooks: HookDictType
+    sa_model_class: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
 ) -> type:
     cls_name: str = sa_model_class.__name__
 
@@ -519,51 +548,45 @@ def create_update_obj_mutation_object(
         f"PartialUpdate{cls_name}", (graphene.Mutation,), update_obj_partial_class_items
     )
 
+    # Get class name from the outside and build the parameter name dynamically
+    param_name = f"{cls_name.lower()}_data"
+
+    # primary key name
+    pk_name = inspect(sa_model_class).primary_key[0].name
+
     # Mutate Function Entry Point
     def mutate_func(root, info, **kwargs):
-        # Get class name from the outside and build the parameter name dynamically
-        param_name = f"{cls_name.lower()}_data"
 
         # Get the new instance data from kwargs[param_name]
-        update_data: dict = kwargs.get(param_name)
+        incoming_update_request: dict = kwargs.get(param_name)
 
-        ###################
-        # UPDATE DATA
-        ###################
+        with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
 
-        # Get DB Session
-        s: Session = get_session_hook()
+            # #### SQLAlchemy TIME ####
 
-        # primary key name
-        pk_name = inspect(sa_model_class).primary_key[0].name
+            # 1- get original entity from SA
+            sa_obj = get_sa_obj_by_pk_id(
+                sa_model_class, pk_name, incoming_update_request[pk_name], s
+            )
 
-        # Get the Original Object by PRIMARY KEY ID
-        def get_sa_class_by_pk_id(sa_class: DeclarativeMeta, pk_id: int) -> Query:
-            x = s.query(sa_class).filter(getattr(sa_class, pk_name) == int(pk_id))
+            # 2- modify it
+            for k, v in incoming_update_request.items():
+                setattr(sa_obj, k, v)
 
-            return x
+            # 3- add to session
+            s.add(sa_obj)
 
-        # #### SQLAlchemy TIME ####
+            # 4- commit
+            s.commit()
 
-        # 1- get original entity from SA
-        sa_obj = get_sa_class_by_pk_id(sa_model_class, update_data[pk_name]).one()
+            # 5- convert updated object to a dict
+            sa_instance_as_dict = sa_instance_to_dict(sa_obj)
 
-        # # 2- modify it
-        for k, v in update_data.items():
-            setattr(sa_obj, k, v)
-        #
-        # # 3- add to session
-        s.add(sa_obj)
-
-        # 4- commit
-        s.commit()
-
-        # 5- convert updated object to a dict
-        sa_instance_as_dict = sa_instance_to_dict(sa_obj)
         partial_update_obj_class_invocation = {
             new_graphql_obj_name: gql_object(**sa_instance_as_dict)
         }
 
+        gc.collect()
         return update_obj_partial_class(**partial_update_obj_class_invocation)
 
     # Decorate resolve_func with the provided hooks class, if we have one.
@@ -638,7 +661,7 @@ def create_gql_mutation_create_arguments_class(sa_model_class: DeclarativeMeta) 
 # create<Model> MAIN FUNCTION
 ################################
 def create_create_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, get_session_hook, hooks: HookDictType
+    sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
 ) -> type:
     cls_name: str = sa_model_class.__name__
 
@@ -666,39 +689,40 @@ def create_create_obj_mutation_object(
         f"PartialCreate{cls_name}", (graphene.Mutation,), create_obj_partial_class_items
     )
 
+    # Get class name from the outside and build the parameter name dynamically
+    param_name = f"{cls_name.lower()}_data"
+
     # Mutate Function Entry Point
     def mutate_func(root, info, **kwargs):
-        # Get class name from the outside and build the parameter name dynamically
-        param_name = f"{cls_name.lower()}_data"
+        with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
 
-        # Get DB Session
-        s: Session = get_session_hook()
+            # Get the new instance data from kwargs[param_name]
+            create_data: dict = kwargs.get(param_name)
 
-        # Get the new instance data from kwargs[param_name]
-        create_data: dict = kwargs.get(param_name)
+            ###################
+            # CREATE DATA
+            ###################
 
-        ###################
-        # CREATE DATA
-        ###################
+            # 1- Create a new object
+            new_obj = sa_model_class()
 
-        # 1- Create a new object
-        new_obj = sa_model_class()
+            # 2- Add data from the GraphQL Request to the SQLAlchemy Object
+            for k, v in create_data.items():
+                setattr(new_obj, k, v)
 
-        # 2- Add data from the GraphQL Request to the SQLAlchemy Object
-        for k, v in create_data.items():
-            setattr(new_obj, k, v)
+            # 3- Add new obj to Session
+            s.add(new_obj)
 
-        # 3- Add new obj to Session
-        s.add(new_obj)
+            # 4- Commit!
+            s.commit()
 
-        # 4- Commit!
-        s.commit()
+            # 5- Convert newly created object to a dict and return it back
+            sa_instance_as_dict = sa_instance_to_dict(new_obj)
+            partial_create_obj_class_invocation = {
+                new_graphql_obj_name: gql_object(**sa_instance_as_dict)
+            }
 
-        # 5- Convert newly created object to a dict and return it back
-        sa_instance_as_dict = sa_instance_to_dict(new_obj)
-        partial_create_obj_class_invocation = {
-            new_graphql_obj_name: gql_object(**sa_instance_as_dict)
-        }
+        gc.collect()
 
         return create_obj_partial_class(**partial_create_obj_class_invocation)
 
@@ -729,7 +753,6 @@ def create_create_obj_mutation_object(
 # "Delete" Mutation's Argument Class
 ################################
 def create_gql_mutation_delete_arguments_class(sa_model_class: DeclarativeMeta) -> type:
-
     arg_class_items = {}
 
     primary_keys = inspect(sa_model_class).primary_key
@@ -747,15 +770,11 @@ def create_gql_mutation_delete_arguments_class(sa_model_class: DeclarativeMeta) 
 # delete<Model> MAIN FUNCTION
 ################################
 def create_delete_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, get_session_hook, hooks: HookDictType
+    sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
 ) -> type:
+
+    # Class Name
     cls_name: str = sa_model_class.__name__
-
-    # use the same name as the SQLAlchemy's class name
-    new_graphql_obj_name = cls_name
-
-    # get the graphql object associated with this SQLAlchemy Model Class
-    gql_object = get_global_registry().get_type_for_model(sa_model_class)
 
     ################################
     # create a partial class to be able to use it inside the mutate() function ;-)
@@ -783,38 +802,37 @@ def create_delete_obj_mutation_object(
 
     # Mutate Function Entry Point
     def mutate_func(root, info, **kwargs):
-        # get pk_name from the outside scope
-        nonlocal pk_names
 
-        pkdict = {}
+        pk_dict = {}
         for pk_name in pk_names:
             # Get the new instance data from kwargs[param_name]
-            pkdict[pk_name] = kwargs.get(pk_name)
+            pk_dict[pk_name] = kwargs.get(pk_name)
 
-        ###################
-        # DELETE DATA
-        ###################
+        with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
 
-        # Get DB Session
-        s: Session = get_session_hook()
+            ###################
+            # DELETE DATA
+            ###################
 
-        # Find the object and flag it for deletion in the next commit.
-        deleted_base_query = s.query(sa_model_class)
-        for pk_name, pk_id in pkdict.items():
-            deleted_base_query = deleted_base_query.filter(
-                getattr(sa_model_class, pk_name) == int(pk_id)
-            )
+            # Find the object and flag it for deletion in the next commit.
+            deleted_base_query = s.query(sa_model_class)
+            for pk_name, pk_id in pk_dict.items():
+                deleted_base_query = deleted_base_query.filter(
+                    getattr(sa_model_class, pk_name) == int(pk_id)
+                )
 
-        # Delete and return how many objects were deleted.
-        deleted_count = deleted_base_query.delete()
+            # Delete and return how many objects were deleted.
+            deleted_count = deleted_base_query.delete()
 
-        # Commit (Delete)
-        s.commit()
+            # Commit
+            s.commit()
 
-        # Return the ID of the deleted object as 'result'
+        # Return the count of deleted objects as 'result'
         partial_delete_obj_class_invocation = {
             deleted_count_arg_name: int(deleted_count)
         }
+
+        gc.collect()
 
         return delete_obj_partial_class(**partial_delete_obj_class_invocation)
 
