@@ -192,6 +192,7 @@ def make_resolve_func_maker_func_name(sa_queryable_obj) -> str:
 def make_resolve_func_maker(
     sa_queryable_obj: DeclarativeMeta, get_session_func: Callable, hooks: HookDictType
 ) -> Callable:
+
     def resolve_func(_parent, _info, **kwargs):
         nonlocal sa_queryable_obj
 
@@ -200,6 +201,9 @@ def make_resolve_func_maker(
 
         # Get the Session() so we can access the database
         s: Session = get_session_func()
+
+        # Never Reuse Objects
+        s.rollback()
 
         ################################
         # Base Query
