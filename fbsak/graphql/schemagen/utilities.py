@@ -9,7 +9,9 @@ from graphene.utils.subclass_with_meta import SubclassWithMeta_Meta
 from graphene_sqlalchemy import SQLAlchemyObjectType
 from graphene_sqlalchemy.converter import convert_sqlalchemy_type
 from graphene_sqlalchemy.registry import get_global_registry
+from graphql import GraphQLError
 from sqlalchemy import Column, inspect, ColumnDefault, Table, create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy.orm import Mapper, Session, Query
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -695,6 +697,7 @@ def create_create_obj_mutation_object(
     # Mutate Function Entry Point
     def mutate_func(root, info, **kwargs):
         with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
+            s: Session
 
             # Get the new instance data from kwargs[param_name]
             create_data: dict = kwargs.get(param_name)
@@ -714,7 +717,12 @@ def create_create_obj_mutation_object(
             s.add(new_obj)
 
             # 4- Commit!
-            s.commit()
+            try:
+                s.commit()
+            except IntegrityError as e:
+                s.rollback()
+                s.flush()
+                raise GraphQLError(e.args)
 
             # 5- Convert newly created object to a dict and return it back
             sa_instance_as_dict = sa_instance_to_dict(new_obj)
