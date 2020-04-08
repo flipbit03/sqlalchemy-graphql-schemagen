@@ -11,11 +11,12 @@ from graphene_sqlalchemy.converter import convert_sqlalchemy_type
 from graphene_sqlalchemy.registry import get_global_registry
 from graphql import GraphQLError
 from sqlalchemy import Column, inspect, ColumnDefault, Table, create_engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, DBAPIError
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy.orm import Mapper, Session, Query
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.orm.state import InstanceState
+from sqlalchemy.pool import NullPool
 
 from . import HookDictType
 from .extra import (
@@ -202,7 +203,7 @@ def make_resolve_func_maker_func_name(sa_queryable_obj) -> str:
 def scoped_db_session_from_sa_connection_string(sa_connection_string: str) -> Session:
     """ Creates a context with an open SQLAlchemy session.
     """
-    engine = create_engine(sa_connection_string, convert_unicode=True)
+    engine = create_engine(sa_connection_string, convert_unicode=True, poolclass=NullPool)
     connection = engine.connect()
     scoped_db_session = scoped_session(
         sessionmaker(autocommit=False, autoflush=True, bind=engine)
@@ -563,6 +564,7 @@ def create_update_obj_mutation_object(
         incoming_update_request: dict = kwargs.get(param_name)
 
         with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
+            s: Session
 
             # #### SQLAlchemy TIME ####
 
@@ -575,11 +577,17 @@ def create_update_obj_mutation_object(
             for k, v in incoming_update_request.items():
                 setattr(sa_obj, k, v)
 
-            # 3- add to session
-            s.add(sa_obj)
+            try:
+                # 3- add to session
+                s.add(sa_obj)
 
-            # 4- commit
-            s.commit()
+                # 4- commit
+                s.commit()
+            except DBAPIError as e:
+                s.rollback()
+                s.flush()
+                s.close()
+                raise GraphQLError(e.args)
 
             # 5- convert updated object to a dict
             sa_instance_as_dict = sa_instance_to_dict(sa_obj)
@@ -713,15 +721,16 @@ def create_create_obj_mutation_object(
             for k, v in create_data.items():
                 setattr(new_obj, k, v)
 
-            # 3- Add new obj to Session
-            s.add(new_obj)
-
-            # 4- Commit!
             try:
+                # 3- Add new obj to Session
+                s.add(new_obj)
+
+                # 4- Commit!
                 s.commit()
-            except IntegrityError as e:
+            except DBAPIError as e:
                 s.rollback()
                 s.flush()
+                s.close()
                 raise GraphQLError(e.args)
 
             # 5- Convert newly created object to a dict and return it back
@@ -817,6 +826,7 @@ def create_delete_obj_mutation_object(
             pk_dict[pk_name] = kwargs.get(pk_name)
 
         with scoped_db_session_from_sa_connection_string(sa_connection_string) as s:
+            s: Session
 
             ###################
             # DELETE DATA
@@ -830,10 +840,14 @@ def create_delete_obj_mutation_object(
                 )
 
             # Delete and return how many objects were deleted.
-            deleted_count = deleted_base_query.delete()
-
-            # Commit
-            s.commit()
+            try:
+                deleted_count = deleted_base_query.delete()
+                s.commit()
+            except DBAPIError as e:
+                s.rollback()
+                s.flush()
+                s.close()
+                raise GraphQLError(e.args)
 
         # Return the count of deleted objects as 'result'
         partial_delete_obj_class_invocation = {
