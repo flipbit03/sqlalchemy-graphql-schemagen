@@ -209,8 +209,10 @@ def scoped_db_session_from_sa_connection_string(sa_connection_string: str) -> Se
         sessionmaker(autocommit=False, autoflush=True, bind=engine)
     )
     yield scoped_db_session
-    scoped_db_session.close()
-    connection.close()
+
+    # Leave the session and connection open, GraphQL
+    #scoped_db_session.close()
+    #connection.close()
 
 
 def make_resolve_func_maker(
