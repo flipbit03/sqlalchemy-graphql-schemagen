@@ -55,7 +55,7 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
         self.op_hooks = op_hooks or {}
 
         # Save and register SQLAlchemy Composite Types
-        self.sa_composite_converters = sa_composite_converters or tuple()
+        self.sa_composite_converters = sa_composite_converters or {}
         self.register_composites()
 
     def register_composites(self):
