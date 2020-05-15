@@ -10,11 +10,11 @@ from graphene import ID, Argument
 from graphene_sqlalchemy.converter import convert_sqlalchemy_composite
 from graphene_sqlalchemy.registry import get_global_registry
 
-from fbsak.baseclasses.logging import SimpleLoggableBase
+from sqlalchemy_graphql_schemagen.baseclasses.logging import SimpleLoggableBase
 
-from fbsak.graphql.schemagen.extra import create_or_get_graphql_filter_op_type_class
-from fbsak.graphql.schemagen.hooks import SchemaGenHooksBase, HookDictType
-from fbsak.graphql.schemagen.utilities import (
+from sqlalchemy_graphql_schemagen.graphql.schemagen.extra import create_or_get_graphql_filter_op_type_class
+from sqlalchemy_graphql_schemagen.graphql.schemagen.hooks import SchemaGenHooksBase, HookDictType
+from sqlalchemy_graphql_schemagen.graphql.schemagen.utilities import (
     get_graphql_field_type_for_sa_column,
     mask_ID_to_Int,
     get_columns_from_sa_model_class,

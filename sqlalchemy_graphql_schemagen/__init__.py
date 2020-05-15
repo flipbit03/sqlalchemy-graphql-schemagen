@@ -1,0 +1,1 @@
+from sqlalchemy_graphql_schemagen.graphql.schemagen import SQLAlchemyGraphQLSchemaGenerator

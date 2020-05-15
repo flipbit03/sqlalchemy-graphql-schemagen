@@ -4,15 +4,15 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="fbsak",
+    name="sqlalchemy-graphql-schemagen",
     license="MIT",
-    version="0.9.6",
+    version="0.9.7",
     author="flipbit03",
     author_email="cadu.coelho@gmail.com",
-    description="flipbit03's Swiss Army Knife",
+    description="Generate a full (query+mutation) GraphQL schema from your SQLAlchemy Declarative Model Base.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/flipbit03/fbsak",
+    url="https://github.com/flipbit03/sqlalchemy-graphql-schemagen",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
