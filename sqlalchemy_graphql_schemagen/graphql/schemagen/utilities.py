@@ -577,6 +577,12 @@ def create_update_obj_mutation_object(
 
             # 2- modify it
             for k, v in incoming_update_request.items():
+                # skip re-setting the primary key as that can trigger unwanted dirty() pkid
+                # updates that might fail.
+                if k == pk_name:
+                    continue
+
+                # Update the attribute value
                 setattr(sa_obj, k, v)
 
             try:
