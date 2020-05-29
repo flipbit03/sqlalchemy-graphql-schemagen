@@ -35,15 +35,18 @@ from sqlalchemy_graphql_schemagen.graphql.schemagen.utilities import (
 
 
 class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
-    def __init__(
-        self,
-        api_name: str,
-        declarative_base: DeclarativeMeta,
-        sa_connection_string: str,
-        op_hooks: HookDictType = None,
-        sa_composite_converters: Dict[Any, Any] = None,
-        graphene_schema_args: dict = None,
-    ):
+    def __init__(self, api_name: str, declarative_base: DeclarativeMeta, sa_connection_string: str,
+                 ignore_models: List = None, op_hooks: HookDictType = None, sa_composite_converters: Dict[Any, Any] = None,
+                 extra_query_objects: Dict[str, graphene.ObjectType] = None,
+                 extra_mutation_objects: Dict[str, graphene.ObjectType] = None, graphene_schema_args: dict = None):
+
+        # List of Models to ignore during dynamic SQLAlchemy-->GraphQL generation
+        self.ignore_models = ignore_models if ignore_models else []
+
+        # Extra (query|mutation) objects
+        self.extra_mutation_objects = extra_mutation_objects if extra_mutation_objects else {}
+        self.extra_query_objects = extra_query_objects if extra_query_objects else {}
+
         self.graphene_schema_args = graphene_schema_args if graphene_schema_args else {}
         self.api_name = api_name
         self.declarative_base = declarative_base
@@ -121,9 +124,15 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
 
         # Iterate through all SQLAlchemy's classes, building GraphQL Objects
         for sa_queryable_object in all_objects:
+
             self.generate_query_schema_sa_class(
                 root_query_class_dict, sa_queryable_object
             )
+
+        # Iterate through extra_query_objects
+        for obj_name, graphene_obj in self.extra_query_objects.items():
+            self.l.debug(f"Attaching Extra_Query_Object {obj_name}...")
+            root_query_class_dict[obj_name] = graphene_obj
 
         # Build Main Class and attach objects built in the last step.
         root_query_class = type(
@@ -180,31 +189,35 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
         resolve_func = make_resolve_func_maker(
             sa_queryable_object, self.sa_connection_string, self.op_hooks
         )
-        # Attach resolve func to class.
-        root_query_class_dict[resolve_func.__name__] = resolve_func
-        # Build {Class} = graphene.List({Class})
+
+        # Build {Class} = graphene.ObjectType({Class})
         graphql_model_class = gql_query_build_sa_obj_type(sa_queryable_object)
-        # Attach {Class} = graphene.List({Class})
-        root_query_class_dict[f"{sa_table_name}"] = graphene.List(
-            graphql_model_class,
-            description=make_gql_object_description_from_sa_model_class(
-                sa_queryable_object
-            ),
-            filters=create_gql_get_query_filter_input_object_type_from_sa_model(
-                sa_queryable_object
-            ),
-            order_by=create_gql_get_query_order_by_filter_input_object_type_from_sa_model(
-                sa_queryable_object
-            ),
-            page=Argument(
-                graphene.Int, default_value=1, description="(Pagination) Page Number"
-            ),
-            perpage=Argument(
-                graphene.Int,
-                default_value=50,
-                description="(Pagination) Results Per Page",
-            ),
-        )
+
+        if sa_queryable_object not in self.ignore_models:
+            # Attach resolve func to class.
+            root_query_class_dict[resolve_func.__name__] = resolve_func
+
+            # Attach {Class} = graphene.List({Class})
+            root_query_class_dict[f"{sa_table_name}"] = graphene.List(
+                graphql_model_class,
+                description=make_gql_object_description_from_sa_model_class(
+                    sa_queryable_object
+                ),
+                filters=create_gql_get_query_filter_input_object_type_from_sa_model(
+                    sa_queryable_object
+                ),
+                order_by=create_gql_get_query_order_by_filter_input_object_type_from_sa_model(
+                    sa_queryable_object
+                ),
+                page=Argument(
+                    graphene.Int, default_value=1, description="(Pagination) Page Number"
+                ),
+                perpage=Argument(
+                    graphene.Int,
+                    default_value=50,
+                    description="(Pagination) Results Per Page",
+                ),
+            )
 
 
     ##################################################
@@ -216,6 +229,9 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             "__doc__": f'Root Mutation Class for "{self.api_name}"'
         }
         for sa_model_class in get_all_sa_model_classes(self.declarative_base):
+            if sa_model_class in self.ignore_models:
+                continue
+
             class_name = sa_model_class.__name__
             self.l.debug(f"[Mutation] SQLAlchemy Class --> {class_name}")
 
@@ -256,6 +272,12 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             root_mutation_class_dict[
                 f"delete_{class_name.lower()}"
             ] = delete_obj_class.Field()
+
+
+        # Iterate through extra_mutation_objects
+        for obj_name, graphene_obj in self.extra_mutation_objects.items():
+            self.l.debug(f"Attaching Extra_Mutation_Object {obj_name}...")
+            root_mutation_class_dict[obj_name] = graphene_obj
 
         root_mutation_class = type(
             f"Mutation_{self.api_name}",
