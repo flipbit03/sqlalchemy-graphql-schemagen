@@ -79,7 +79,7 @@ def get_sa_queryable_name(sa_queryable_obj):
 # Get all SQLAlchemy's Model Classes as a List
 ################################
 def get_all_sa_model_classes(
-    sa_model_base_class: DeclarativeMeta,
+        sa_model_base_class: DeclarativeMeta,
 ) -> List[DeclarativeMeta]:
     # Get SQLAlchemy Class Registry
     sa_class_registry: dict = getattr(sa_model_base_class, "_decl_class_registry")
@@ -93,7 +93,7 @@ def get_all_sa_model_classes(
 ################################
 # Get all SQLAlchemy's Model Classless Tables (ex:many2many) as a List
 ################################
-def get_all_sa_classless_tables(sa_model_base_class: DeclarativeMeta,) -> List[Table]:
+def get_all_sa_classless_tables(sa_model_base_class: DeclarativeMeta, ) -> List[Table]:
     # Get SQLAlchemy Class Registry
     sa_class_registry: dict = getattr(sa_model_base_class, "_decl_class_registry")
 
@@ -158,11 +158,24 @@ def create_input_field_args(sa_column) -> dict:
     return field_args
 
 
-def gql_query_build_sa_obj_type(sa_queryable_object: Union[DeclarativeMeta, Table]):
+def gql_query_build_sa_obj_type(sa_queryable_object: Union[DeclarativeMeta, Table],
+                                extra_metaclass_properties: Dict[str, object] = None):
+    if not extra_metaclass_properties:
+        extra_metaclass_properties = {}
+
+    # This dict holds the properties that need to exist in the metaclass
+    metaclass_properties = {"model": sa_queryable_object, "description": sa_queryable_object.__doc__}
+
+    # Set extra properties
+    # Good examples:
+    #   only_fields = ("name",)
+    #   exclude_fields = ("last_name",)
+    metaclass_properties.update(extra_metaclass_properties)
+
     meta_model_class = type(
         "Meta",
         (),
-        {"model": sa_queryable_object, "description": sa_queryable_object.__doc__},
+        metaclass_properties,
     )
 
     sa_obj_type_class = type(
@@ -211,12 +224,12 @@ def scoped_db_session_from_sa_connection_string(sa_connection_string: str) -> Se
     yield scoped_db_session
 
     # Leave the session and connection open, GraphQL
-    #scoped_db_session.close()
-    #connection.close()
+    # scoped_db_session.close()
+    # connection.close()
 
 
 def make_resolve_func_maker(
-    sa_queryable_obj: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
+        sa_queryable_obj: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
 ) -> Callable:
     # Get Mapper for SQLAlchemy's Model Class
 
@@ -366,7 +379,7 @@ mask_ID_to_Int: mask_type = {graphene.ID: graphene.Int}
 
 
 def get_graphql_field_type_for_sa_column(
-    column: Column, mask: mask_type = None
+        column: Column, mask: mask_type = None
 ) -> SubclassWithMeta_Meta:
     original_graphql_type = convert_sqlalchemy_type(
         column.type, column, get_global_registry()
@@ -437,7 +450,7 @@ def create_or_get_gql_field_list_enum_from_sa_model(mc: DeclarativeMeta):
 
 
 def create_gql_get_query_order_by_filter_input_object_type_from_sa_model(
-    mc: DeclarativeMeta,
+        mc: DeclarativeMeta,
 ):
     field_enum = create_or_get_gql_field_list_enum_from_sa_model(mc)
 
@@ -464,7 +477,7 @@ def create_gql_get_query_order_by_filter_input_object_type_from_sa_model(
 # Object that validates the input arguments of the Update<Model> function
 ################################
 def create_gql_update_input_object_type_from_sa_class(
-    sa_model_class: DeclarativeMeta,
+        sa_model_class: DeclarativeMeta,
 ) -> type:
     sa_column_list = get_columns_from_sa_model_class(sa_model_class)
 
@@ -515,7 +528,7 @@ def create_gql_mutation_update_arguments_class(sa_model_class: DeclarativeMeta) 
 # Get the Original Object by PRIMARY KEY ID
 ################################
 def get_sa_obj_by_pk_id(
-    sa_class: DeclarativeMeta, pk_name: str, pk_id: int, s: Session
+        sa_class: DeclarativeMeta, pk_name: str, pk_id: int, s: Session
 ) -> DeclarativeMeta:
     x = s.query(sa_class).filter(getattr(sa_class, pk_name) == int(pk_id)).one()
     return x
@@ -525,7 +538,7 @@ def get_sa_obj_by_pk_id(
 # update<Model> MAIN FUNCTION
 ################################
 def create_update_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
+        sa_model_class: DeclarativeMeta, sa_connection_string: str, hooks: HookDictType
 ) -> type:
     cls_name: str = sa_model_class.__name__
 
@@ -636,7 +649,7 @@ def create_update_obj_mutation_object(
 # Object that validates the input arguments of the Create<Model> function
 ################################
 def create_gql_create_input_object_type_from_sa_class(
-    sa_model_class: DeclarativeMeta,
+        sa_model_class: DeclarativeMeta,
 ) -> type:
     sa_column_list = get_columns_from_sa_model_class(sa_model_class)
 
@@ -679,7 +692,7 @@ def create_gql_mutation_create_arguments_class(sa_model_class: DeclarativeMeta) 
 # create<Model> MAIN FUNCTION
 ################################
 def create_create_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
+        sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
 ) -> type:
     cls_name: str = sa_model_class.__name__
 
@@ -795,9 +808,8 @@ def create_gql_mutation_delete_arguments_class(sa_model_class: DeclarativeMeta) 
 # delete<Model> MAIN FUNCTION
 ################################
 def create_delete_obj_mutation_object(
-    sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
+        sa_model_class: DeclarativeMeta, sa_connection_string, hooks: HookDictType
 ) -> type:
-
     # Class Name
     cls_name: str = sa_model_class.__name__
 

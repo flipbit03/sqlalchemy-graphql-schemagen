@@ -38,16 +38,18 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
     def __init__(self, api_name: str, declarative_base: DeclarativeMeta, sa_connection_string: str,
                  ignore_models: List = None, op_hooks: HookDictType = None, sa_composite_converters: Dict[Any, Any] = None,
                  extra_query_objects: Dict[str, graphene.ObjectType] = None,
-                 extra_mutation_objects: Dict[str, graphene.ObjectType] = None, graphene_schema_args: dict = None):
+                 extra_mutation_objects: Dict[str, graphene.ObjectType] = None,
+                 extra_object_meta_args: Dict[DeclarativeMeta, Dict[str, object]] = None):
 
         # List of Models to ignore during dynamic SQLAlchemy-->GraphQL generation
+
         self.ignore_models = ignore_models if ignore_models else []
 
-        # Extra (query|mutation) objects
+        # Extra (query|mutation|object meta) objects
         self.extra_mutation_objects = extra_mutation_objects if extra_mutation_objects else {}
         self.extra_query_objects = extra_query_objects if extra_query_objects else {}
+        self.extra_object_meta_args = extra_object_meta_args if extra_object_meta_args else {}
 
-        self.graphene_schema_args = graphene_schema_args if graphene_schema_args else {}
         self.api_name = api_name
         self.declarative_base = declarative_base
 
@@ -190,8 +192,13 @@ class SQLAlchemyGraphQLSchemaGenerator(SimpleLoggableBase):
             sa_queryable_object, self.sa_connection_string, self.op_hooks
         )
 
+        extra_metaclass_properties = {}
+        if sa_queryable_object in self.extra_object_meta_args:
+            extra_metaclass_properties = self.extra_object_meta_args[sa_queryable_object]
+
         # Build {Class} = graphene.ObjectType({Class})
-        graphql_model_class = gql_query_build_sa_obj_type(sa_queryable_object)
+        graphql_model_class = gql_query_build_sa_obj_type(sa_queryable_object,
+                                                          extra_metaclass_properties=extra_metaclass_properties)
 
         if sa_queryable_object not in self.ignore_models:
             # Attach resolve func to class.
