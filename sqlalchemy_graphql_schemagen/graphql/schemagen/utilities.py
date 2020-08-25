@@ -258,6 +258,15 @@ def make_resolve_func_maker(
 
                     sa_column: Column = m.columns[filter_name]
 
+                    if FilterOperation.get(filter_obj.op) == FilterOperation.BETWEEN:
+                        q = q.filter(sa_column.between(filter_obj.vl[0], filter_obj.vl[1]))
+
+                    if FilterOperation.get(filter_obj.op) == FilterOperation.NOTIN:
+                        q = q.filter(sa_column.notin_(filter_obj.vl))
+
+                    if FilterOperation.get(filter_obj.op) == FilterOperation.IN:
+                        q = q.filter(sa_column.in_(filter_obj.vl))
+
                     if FilterOperation.get(filter_obj.op) == FilterOperation.EQ:
                         q = q.filter(sa_column == filter_obj.v)
 
@@ -291,7 +300,6 @@ def make_resolve_func_maker(
             ################################
             # ORDER_BY
             ################################
-
             order_by_params = kwargs.get("order_by")
 
             if order_by_params:
@@ -313,7 +321,7 @@ def make_resolve_func_maker(
 
             results = q.all()
 
-            gc.collect()
+            #gc.collect()
 
         return results
 
@@ -543,7 +551,7 @@ def create_update_obj_mutation_object(
     cls_name: str = sa_model_class.__name__
 
     # use the same name as the SQLAlchemy's class name
-    new_graphql_obj_name = cls_name
+    updated_graphql_obj_name = cls_name
 
     # get the graphql object associated with this SQLAlchemy Model Class
     gql_object = get_global_registry().get_type_for_model(sa_model_class)
@@ -556,7 +564,7 @@ def create_update_obj_mutation_object(
         # Update Mutation Arguments
         "Arguments": create_gql_mutation_update_arguments_class(sa_model_class),
         # The return value of the update mutation query (the same object)
-        new_graphql_obj_name: graphene.Field(lambda: gql_object),
+        updated_graphql_obj_name: graphene.Field(lambda: gql_object),
         # this needs to exist or else the class cannot be created, it needs this item to exist.
         "mutate": lambda: None,
     }
@@ -584,7 +592,7 @@ def create_update_obj_mutation_object(
             # #### SQLAlchemy TIME ####
 
             # 1- get original entity from SA
-            sa_obj = get_sa_obj_by_pk_id(
+            to_update_sa_obj = get_sa_obj_by_pk_id(
                 sa_model_class, pk_name, incoming_update_request[pk_name], s
             )
 
@@ -596,11 +604,11 @@ def create_update_obj_mutation_object(
                     continue
 
                 # Update the attribute value
-                setattr(sa_obj, k, v)
+                setattr(to_update_sa_obj, k, v)
 
             try:
                 # 3- add to session
-                s.add(sa_obj)
+                s.add(to_update_sa_obj)
 
                 # 4- commit
                 s.commit()
@@ -610,14 +618,11 @@ def create_update_obj_mutation_object(
                 s.close()
                 raise GraphQLError(e.args)
 
-            # 5- convert updated object to a dict
-            sa_instance_as_dict = sa_instance_to_dict(sa_obj)
-
         partial_update_obj_class_invocation = {
-            new_graphql_obj_name: gql_object(**sa_instance_as_dict)
+            updated_graphql_obj_name: to_update_sa_obj
         }
 
-        gc.collect()
+        #gc.collect()
         return update_obj_partial_class(**partial_update_obj_class_invocation)
 
     # Decorate resolve_func with the provided hooks class, if we have one.
@@ -754,13 +759,13 @@ def create_create_obj_mutation_object(
                 s.close()
                 raise GraphQLError(e.args)
 
-            # 5- Convert newly created object to a dict and return it back
+            # 5- Attach the newly created object to the return object
             sa_instance_as_dict = sa_instance_to_dict(new_obj)
             partial_create_obj_class_invocation = {
-                new_graphql_obj_name: gql_object(**sa_instance_as_dict)
+                new_graphql_obj_name: new_obj
             }
 
-        gc.collect()
+        #gc.collect()
 
         return create_obj_partial_class(**partial_create_obj_class_invocation)
 
@@ -874,7 +879,7 @@ def create_delete_obj_mutation_object(
             deleted_count_arg_name: int(deleted_count)
         }
 
-        gc.collect()
+        #gc.collect()
 
         return delete_obj_partial_class(**partial_delete_obj_class_invocation)
 

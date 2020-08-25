@@ -29,6 +29,10 @@ class FilterOperation(graphene.Enum):
     ILIKE = "ILIKE"
     NOTILIKE = "NOTILIKE"
 
+    # List operator
+    IN = "IN"
+    NOTIN = "NOTIN"
+    BETWEEN = "BETWEEN"
 
 ################################
 # <type>FilterOp GraphQL Object
@@ -53,6 +57,7 @@ def create_or_get_graphql_filter_op_type_class(graphql_type: SubclassWithMeta_Me
             {
                 "op": graphene.Field(FilterOperation, required=True),
                 "v": graphene.Field(graphql_type, required=False, default_value=None),
+                "vl": graphene.Field(graphene.List(graphql_type), required=False, default_value=None)
             },
         )
 
