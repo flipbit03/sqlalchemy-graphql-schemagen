@@ -258,44 +258,36 @@ def make_resolve_func_maker(
 
                     sa_column: Column = m.columns[filter_name]
 
-                    if FilterOperation.get(filter_obj.op) == FilterOperation.BETWEEN:
-                        q = q.filter(sa_column.between(filter_obj.vl[0], filter_obj.vl[1]))
-
-                    if FilterOperation.get(filter_obj.op) == FilterOperation.NOTIN:
-                        q = q.filter(sa_column.notin_(filter_obj.vl))
-
-                    if FilterOperation.get(filter_obj.op) == FilterOperation.IN:
-                        q = q.filter(sa_column.in_(filter_obj.vl))
-
                     if FilterOperation.get(filter_obj.op) == FilterOperation.EQ:
                         q = q.filter(sa_column == filter_obj.v)
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.NEQ:
                         q = q.filter(sa_column != filter_obj.v)
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.IS:
                         q = q.filter(sa_column.is_(filter_obj.v))
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.ISNOT:
                         q = q.filter(sa_column.isnot(filter_obj.v))
-
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.ISNULL:
+                        q = q.filter(sa_column.is_(None))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.ISNOTNULL:
+                        q = q.filter(sa_column.isnot(None))
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.LT:
                         q = q.filter(sa_column < filter_obj.v)
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.GT:
                         q = q.filter(sa_column > filter_obj.v)
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.LIKE:
                         q = q.filter(sa_column.like(f"%{filter_obj.v}%"))
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTLIKE:
                         q = q.filter(sa_column.notlike(f"%{filter_obj.v}%"))
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.ILIKE:
                         q = q.filter(sa_column.ilike(f"%{filter_obj.v}%"))
-
                     elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTILIKE:
                         q = q.filter(sa_column.notilike(f"%{filter_obj.v}%"))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.IN:
+                        q = q.filter(sa_column.in_(filter_obj.vl))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.NOTIN:
+                        q = q.filter(sa_column.notin_(filter_obj.vl))
+                    elif FilterOperation.get(filter_obj.op) == FilterOperation.BETWEEN:
+                        q = q.filter(sa_column.between(filter_obj.vl[0], filter_obj.vl[1]))
 
             ################################
             # ORDER_BY

@@ -19,6 +19,8 @@ class FilterOperation(graphene.Enum):
 
     IS = "IS"
     ISNOT = "ISNOT"
+    ISNULL = "ISNULL"
+    ISNOTNULL = "ISNOTNULL"
 
     LT = "LT"
     GT = "GT"
@@ -33,6 +35,9 @@ class FilterOperation(graphene.Enum):
     IN = "IN"
     NOTIN = "NOTIN"
     BETWEEN = "BETWEEN"
+
+
+
 
 ################################
 # <type>FilterOp GraphQL Object
