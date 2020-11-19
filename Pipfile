@@ -9,6 +9,7 @@ twine = "*"
 
 [packages]
 sqlalchemy-graphql-schemagen = {editable = true, path = "."}
+cryptography = ">=3.2"
 
 [requires]
 python_version = "3.7"
