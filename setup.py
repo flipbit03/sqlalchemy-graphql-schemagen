@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setup(
     name="sqlalchemy-graphql-schemagen",
     license="MIT",
-    version="1.0.5",
+    version="1.0.6",
     author="flipbit03",
     author_email="cadu.coelho@gmail.com",
     description="Generate a full (query+mutation) GraphQL schema from your SQLAlchemy Declarative Model Base.",
@@ -21,7 +21,7 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        "cryptography>=3.2",
+        "cryptography>=3.3.2",
         "flask>=1.1.1",
         "flask-graphql>=2.0.1",
         "graphene-sqlalchemy>=2.2",
